@@ -46,7 +46,6 @@ local Camera = workspace.CurrentCamera
 local desyncEnabled, heavyAnchorEnabled = false, false
 local brakeForceMultiplier = 40
 local isPitting = false
-local pitCooldown = 1.5 
 local autoGrokPITEnabled = false
 local wedgeStrikeEnabled = false
 local wedgeForce = 75
@@ -87,7 +86,6 @@ local function detectAndBypassAntiCheat()
     for _, name in ipairs(acNames) do
         local found = workspace:FindFirstChild(name, true) or game.ReplicatedStorage:FindFirstChild(name, true) or game.StarterPlayer:FindFirstChild(name, true) or game.ServerScriptService:FindFirstChild(name, true)
         if found then
-            print("[ZenithViking] Anti-cheat '" .. name .. "' detected at " .. found:GetFullName() .. " → DESTROYING NOW")
             pcall(function() found:Destroy() end)
             detected = true
         end
@@ -97,7 +95,6 @@ local function detectAndBypassAntiCheat()
         if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
             local lower = obj.Name:lower()
             if lower:find("anti") or lower:find("ac_") or lower:find("adonis") or lower:find("prodais") or lower:find("fling") or lower:find("fly") or lower:find("speedhack") then
-                print("[ZenithViking] Suspicious anti-cheat script found → " .. obj:GetFullName() .. " → DISABLED & DESTROYED")
                 pcall(function() obj.Disabled = true; obj:Destroy() end)
                 detected = true
             end
@@ -105,7 +102,6 @@ local function detectAndBypassAntiCheat()
     end
 
     if detected then
-        print("[ZenithViking] Anti-cheat bypass ACTIVE → blatant speed/fly/fling now safe")
         task.spawn(function()
             while antiCheatBypassEnabled do
                 for _, v in pairs(workspace:GetDescendants()) do
@@ -116,8 +112,6 @@ local function detectAndBypassAntiCheat()
                 task.wait(0.08)
             end
         end)
-    else
-        print("[ZenithViking] No anti-cheat found → full blatant mode ready")
     end
 end
 
@@ -126,13 +120,9 @@ local function enableAntiKick()
     local lp = Players.LocalPlayer
     local oldKick = lp.Kick
     lp.Kick = function(self, reason)
-        if self == lp then
-            print("[ZenithViking] ANTI-KICK TRIGGERED → Blocked server kick: " .. tostring(reason or "No reason"))
-            return
-        end
+        if self == lp then return end
         return oldKick(self, reason)
     end
-    print("[ZenithViking] Anti-Kick ENABLED (local script only)")
 end
 
 -- ==========================================
@@ -149,11 +139,7 @@ MainTab:CreateToggle({Name = "Enable Wedge Strike (Vertical Launch)", CurrentVal
 MainTab:CreateSlider({Name = "Wedge Upward Force", Range = {10, 200}, Increment = 10, CurrentValue = 75, Callback = function(Value) wedgeForce = Value end})
 
 ModTab:CreateToggle({Name = "Vehicle Noclip", CurrentValue = false, Callback = function(Value) noclipEnabled = Value end})
-ModTab:CreateToggle({
-   Name = "Spoofy Vehicle (Power Steering & Downforce)", 
-   CurrentValue = false, 
-   Callback = function(Value) spoofyVehicleEnabled = Value end
-})
+ModTab:CreateToggle({Name = "Spoofy Vehicle (Power Steering & Downforce)", CurrentValue = false, Callback = function(Value) spoofyVehicleEnabled = Value end})
 ModTab:CreateToggle({Name = "Engine Overclock (Speed Hack)", CurrentValue = false, Callback = function(Value) engineOverclockEnabled = Value end})
 ModTab:CreateSlider({Name = "Overclock Multiplier", Range = {1, 50}, Increment = 1, CurrentValue = 5, Callback = function(Value) speedBoostAmount = Value end})
 ModTab:CreateToggle({Name = "Equip Heavy Ram Bar", CurrentValue = false, Callback = function(Value) pushBarEnabled = Value if not pushBarEnabled and activePushBar then activePushBar:Destroy() activePushBar = nil end end})
@@ -227,11 +213,14 @@ local function tryGrokAutoPIT(myCar, myRoot)
                         local sideDot = targetRoot.CFrame.RightVector:Dot(relPos.Unit)
                         local pushSide = (sideDot > 0) and targetRoot.CFrame.RightVector or -targetRoot.CFrame.RightVector
                         
-                        local lateralForce = pushSide * 120
+                        -- Dynamic Force: Scales with speed for a harder hit
+                        local dynamicMultiplier = 120 * (1 + (myRoot.AssemblyLinearVelocity.Magnitude / 100))
+                        local lateralForce = pushSide * dynamicMultiplier
+                        
                         local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce, 0) or Vector3.new(0, 0, 0)
                         local angularForce = Vector3.new(
                             wedgeStrikeEnabled and (sideDot > 0 and 15 or -15) or 0, 
-                            sideDot > 0 and 8 or -8, 
+                            sideDot > 0 and 12 or -12, 
                             wedgeStrikeEnabled and (sideDot > 0 and 10 or -10) or 0
                         )
                         
@@ -239,9 +228,14 @@ local function tryGrokAutoPIT(myCar, myRoot)
                         myRoot.AssemblyAngularVelocity = angularForce
                         
                         local originalProps = myRoot.CustomPhysicalProperties or PhysicalProperties.new(myRoot.Material)
-                        myRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 0.3, 0)
-                        task.delay(0.35, function() if myRoot then myRoot.CustomPhysicalProperties = originalProps end end)
-                        task.delay(pitCooldown, function() isPitting = false end)
+                        -- Density 100, Friction 2.0 (High drag), Elasticity 0 (No bounce)
+                        myRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
+                        
+                        -- Auto PIT needs a tiny reset to avoid crashing the game in a 1-frame loop
+                        task.delay(0.25, function() 
+                            if myRoot then myRoot.CustomPhysicalProperties = originalProps end 
+                            isPitting = false 
+                        end)
                         return 
                     end
                 end
@@ -404,29 +398,26 @@ RunService.Heartbeat:Connect(function(deltaTime)
     local currentVelocity = vehicleRoot.AssemblyLinearVelocity
     local speed = currentVelocity.Magnitude
 
-    -- SPOOFY VEHICLE: DOWNFORCE & POWER STEERING
+    -- TRUE PIVOT SPOOFY VEHICLE
     if spoofyVehicleEnabled and not isPitting then
         local carCFrame = myCar:GetPivot()
         local rightVector = carCFrame.RightVector
         
-        -- Downforce: Pushes the car into the road slightly for massive grip
         vehicleRoot.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, currentVelocity.Y - 1.5, currentVelocity.Z)
         
-        -- Traction Control: Removes 85% of slide, keeping 15% for smooth, natural carving
         local lateralVelocity = vehicleRoot.AssemblyLinearVelocity:Dot(rightVector)
         vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity - (rightVector * (lateralVelocity * 0.85))
         
-        -- Power Steering Override: Forces direction change based on input
         if math.abs(steerInput) > 0 then
             vehicleRoot.AssemblyAngularVelocity = Vector3.new(
                 vehicleRoot.AssemblyAngularVelocity.X,
-                -steerInput * 8, -- Steering sharpness multiplier
+                -steerInput * 8, 
                 vehicleRoot.AssemblyAngularVelocity.Z
             )
         else
             vehicleRoot.AssemblyAngularVelocity = Vector3.new(
                 vehicleRoot.AssemblyAngularVelocity.X,
-                0, -- Kills spin instantly when driving straight
+                0, 
                 vehicleRoot.AssemblyAngularVelocity.Z
             )
         end
@@ -441,27 +432,42 @@ RunService.Heartbeat:Connect(function(deltaTime)
         end
     end
 
-    -- MANUAL GHOST PIT
+    -- MANUAL GHOST PIT (0 Cooldown, Dynamic Speed Scaling)
     if desyncEnabled and not autoGrokPITEnabled and speed > 30 and math.abs(steerInput) > 0.8 then
         if not isPitting then
             isPitting = true 
             
             local carCFrame = myCar:GetPivot()
             local flatRight = (carCFrame.RightVector * Vector3.new(1, 0, 1)).Unit
+            local flatLook = (carCFrame.LookVector * Vector3.new(1, 0, 1)).Unit
             local lateralDirection = flatRight * steerInput
             local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce * 2, 0) or Vector3.new(0, 0, 0)
             
-            vehicleRoot.AssemblyLinearVelocity = currentVelocity + (lateralDirection * (brakeForceMultiplier * 2.5)) + verticalForce
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, steerInput * (brakeForceMultiplier * 0.8), 0)
+            -- Speed Multiplier: Hitting them at 100 MPH makes the strike force 2x stronger
+            local dynamicMultiplier = brakeForceMultiplier * (1 + (speed / 100))
+            
+            -- Forward Lunge: Injects 20% of your current speed forward to punch through the target
+            local forwardLunge = flatLook * (speed * 0.2)
+            
+            vehicleRoot.AssemblyLinearVelocity = currentVelocity + forwardLunge + (lateralDirection * dynamicMultiplier) + verticalForce
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, steerInput * (dynamicMultiplier * 0.5), 0)
             
             if heavyAnchorEnabled then
                 local ogProps = vehicleRoot.CustomPhysicalProperties or PhysicalProperties.new(vehicleRoot.Material)
-                vehicleRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 0.3, 0)
-                task.delay(0.2, function() if vehicleRoot then vehicleRoot.CustomPhysicalProperties = ogProps end end)
+                
+                -- True Titanium: Density 100, High Drag Friction (2), Zero Bounce Elasticity (0)
+                vehicleRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
+                
+                -- Anti-Flip Anchor: Freezes your car from barrel-rolling when hitting them
+                vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, vehicleRoot.AssemblyAngularVelocity.Y, 0)
+                
+                task.delay(0.25, function() if vehicleRoot then vehicleRoot.CustomPhysicalProperties = ogProps end end)
             end
-            task.delay(pitCooldown, function() isPitting = false end)
+            
+            -- COOLDOWN DELETED: isPitting is only reset by straightening the steering wheel below.
         end
     elseif math.abs(steerInput) < 0.2 then
+        -- INSTANT RESET: The millisecond you let go of steer, you can strike again
         isPitting = false
     end
 end)
