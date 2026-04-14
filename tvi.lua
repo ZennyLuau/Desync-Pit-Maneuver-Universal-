@@ -3,7 +3,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "ZenithViking | Tactical System",
    LoadingTitle = "Initializing Systems...",
-   LoadingSubtitle = "by ZEN",
+   LoadingSubtitle = "by Tâm",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
    Theme = {
