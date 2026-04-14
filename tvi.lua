@@ -41,24 +41,30 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
 -- ==========================================
--- [>] SYSTEM VARIABLES
+-- [>] SYSTEM VARIABLES (Separated for Mobile Parsers)
 -- ==========================================
-local desyncEnabled, heavyAnchorEnabled = false, false
+local desyncEnabled = false
+local heavyAnchorEnabled = false
 local brakeForceMultiplier = 40
 local isPitting = false
 local autoGrokPITEnabled = false
 local wedgeStrikeEnabled = false
 local wedgeForce = 75
 
-local noclipEnabled, pushBarEnabled = false, false
+local noclipEnabled = false
+local pushBarEnabled = false
 local activePushBar = nil
 local spoofyVehicleEnabled = false
 local engineOverclockEnabled = false
 local speedBoostAmount = 5
 
-local aimbotEnabled, teamCheckMode, wallCheckEnabled = false, "Ignore Friendly", true
-local aimSmoothness, predictionFactor = 0.5, 0
+local aimbotEnabled = false
+local teamCheckMode = "Ignore Friendly"
+local wallCheckEnabled = true
+local aimSmoothness = 0.5
+local predictionFactor = 0
 local fovEnabled = false
+
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 FOVCircle.Filled = false
@@ -66,11 +72,15 @@ FOVCircle.Color = Color3.fromRGB(0, 180, 255)
 FOVCircle.Thickness = 1
 FOVCircle.Visible = false
 
-local espEnabled, espShowName, espShowHighlight = false, true, true
+local espEnabled = false
+local espShowName = true
+local espShowHighlight = true
 local espObjects = {}
 local espLoop = nil
-local showDesyncVisuals, pingPrediction = false, 0.1
-local activeGhostModel, trackedTarget = nil, nil
+local showDesyncVisuals = false
+local pingPrediction = 0.1
+local activeGhostModel = nil
+local trackedTarget = nil
 
 local antiCheatBypassEnabled = false
 local antiKickEnabled = false
@@ -126,7 +136,8 @@ local function detectAndBypassAntiCheat()
                 
                 for _, root in ipairs(targets) do
                     if root.AssemblyLinearVelocity.Magnitude > 600 then
-                        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity.Unit * 50
+                        local flatVel = root.AssemblyLinearVelocity.Unit
+                        root.AssemblyLinearVelocity = flatVel * 50
                     end
                 end
             end)
@@ -147,9 +158,6 @@ local hookSuccess, hookError = pcall(function()
         return oldNamecall(self, ...)
     end)
 end)
-if not hookSuccess then
-    warn("[ZenithViking] Executor does not support hookmetamethod. Anti-Kick may fail.")
-end
 
 -- ==========================================
 -- [>] COMMAND INTERFACE (GUI)
@@ -301,7 +309,7 @@ for _, player in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================
--- [>] TACTICAL FUNCTIONS
+-- [>] TACTICAL FUNCTIONS (Flattened Math)
 -- ==========================================
 local function tryGrokAutoPIT(myCar, myRoot)
     if isPitting then return end
@@ -315,27 +323,48 @@ local function tryGrokAutoPIT(myCar, myRoot)
                     local relativeDir = (targetRoot.Position - myRoot.Position).Unit
                     local forward = myRoot.CFrame.LookVector
                     local alignment = forward:Dot(relativeDir)
+                    
                     if alignment > 0.55 then
                         isPitting = true
                         local relPos = myRoot.Position - targetRoot.Position
                         local sideDot = targetRoot.CFrame.RightVector:Dot(relPos.Unit)
-                        local pushSide = (sideDot > 0) and targetRoot.CFrame.RightVector or -targetRoot.CFrame.RightVector
                         
-                        local dynamicMultiplier = 120 * (1 + (myRoot.AssemblyLinearVelocity.Magnitude / 100))
-                        local lateralForce = pushSide * dynamicMultiplier
-                        local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce, 0) or Vector3.new(0, 0, 0)
-                        local angularForce = Vector3.new(
-                            wedgeStrikeEnabled and (sideDot > 0 and 15 or -15) or 0, 
-                            sideDot > 0 and 12 or -12, 
-                            wedgeStrikeEnabled and (sideDot > 0 and 10 or -10) or 0
-                        )
+                        local pushSide = -targetRoot.CFrame.RightVector
+                        if sideDot > 0 then pushSide = targetRoot.CFrame.RightVector end
+                        
+                        local speedFactor = myRoot.AssemblyLinearVelocity.Magnitude / 100
+                        local dynMult = 120 * (1 + speedFactor)
+                        local lateralForce = pushSide * dynMult
+                        
+                        local verticalForce = Vector3.new(0, 0, 0)
+                        local angX = 0
+                        local angY = -12
+                        local angZ = 0
+                        
+                        if sideDot > 0 then angY = 12 end
+                        
+                        if wedgeStrikeEnabled then
+                            verticalForce = Vector3.new(0, wedgeForce, 0)
+                            angX = -15
+                            angZ = -10
+                            if sideDot > 0 then 
+                                angX = 15 
+                                angZ = 10 
+                            end
+                        end
+                        
+                        local angularForce = Vector3.new(angX, angY, angZ)
                         
                         myRoot.AssemblyLinearVelocity = myRoot.AssemblyLinearVelocity + lateralForce + verticalForce
                         myRoot.AssemblyAngularVelocity = angularForce
                         
                         local originalProps = myRoot.CustomPhysicalProperties or PhysicalProperties.new(myRoot.Material)
                         myRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
-                        task.delay(0.25, function() if myRoot then myRoot.CustomPhysicalProperties = originalProps end isPitting = false end)
+                        
+                        task.delay(0.25, function() 
+                            if myRoot then myRoot.CustomPhysicalProperties = originalProps end 
+                            isPitting = false 
+                        end)
                         return 
                     end
                 end
@@ -348,11 +377,12 @@ end
 -- [>] EXECUTION LOOPS
 -- ==========================================
 
--- MIGRATED PHYSICS TO STEPPED: Fires BEFORE physics render, overriding custom chassis scripts like A-Chassis
 RunService.Stepped:Connect(function()
     local carData = {getCarData()}
     if not carData[1] then return end
-    local myCar, vehicleRoot, seat = carData[1], carData[2], carData[3]
+    local myCar = carData[1]
+    local vehicleRoot = carData[2]
+    local seat = carData[3]
 
     if noclipEnabled then
         for _, part in pairs(myCar:GetDescendants()) do
@@ -362,38 +392,53 @@ RunService.Stepped:Connect(function()
         end
     end
 
-    local steerInput = seat:IsA("VehicleSeat") and seat.SteerFloat or 0 
-    local throttleInput = seat:IsA("VehicleSeat") and seat.ThrottleFloat or 0
+    local steerInput = 0
+    local throttleInput = 0
+    if seat:IsA("VehicleSeat") then
+        steerInput = seat.SteerFloat
+        throttleInput = seat.ThrottleFloat
+    end
+    
     local currentVelocity = vehicleRoot.AssemblyLinearVelocity
     local speed = currentVelocity.Magnitude
 
-    -- TRUE PIVOT SPOOFY VEHICLE (Bypasses A-Chassis restrictions)
+    -- SPOOFY VEHICLE (Flattened Math)
     if spoofyVehicleEnabled and not isPitting then
         local carCFrame = myCar:GetPivot()
         local rightVector = carCFrame.RightVector
         
-        vehicleRoot.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, currentVelocity.Y - 1.5, currentVelocity.Z)
+        local downForceVec = Vector3.new(currentVelocity.X, currentVelocity.Y - 1.5, currentVelocity.Z)
+        vehicleRoot.AssemblyLinearVelocity = downForceVec
         
         local lateralVelocity = vehicleRoot.AssemblyLinearVelocity:Dot(rightVector)
-        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity - (rightVector * (lateralVelocity * 0.85))
+        local slipCorrection = rightVector * (lateralVelocity * 0.85)
+        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity - slipCorrection
+        
+        local currentAngX = vehicleRoot.AssemblyAngularVelocity.X
+        local currentAngZ = vehicleRoot.AssemblyAngularVelocity.Z
         
         if math.abs(steerInput) > 0 then
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(vehicleRoot.AssemblyAngularVelocity.X, -steerInput * 8, vehicleRoot.AssemblyAngularVelocity.Z)
+            local newTurn = -steerInput * 8
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(currentAngX, newTurn, currentAngZ)
         else
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(vehicleRoot.AssemblyAngularVelocity.X, 0, vehicleRoot.AssemblyAngularVelocity.Z)
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(currentAngX, 0, currentAngZ)
         end
     end
 
-    -- ENGINE OVERCLOCK
+    -- ENGINE OVERCLOCK (Flattened Math)
     if engineOverclockEnabled and throttleInput > 0 then
         local flatLook = (vehicleRoot.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * speedBoostAmount)
+        local boostVec = flatLook * speedBoostAmount
+        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + boostVec
+        
         if antiCheatBypassEnabled then
-            vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * (speedBoostAmount * 1.8))
+            local bypassBoost = speedBoostAmount * 1.8
+            local bypassVec = flatLook * bypassBoost
+            vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + bypassVec
         end
     end
 
-    -- MANUAL GHOST PIT
+    -- MANUAL GHOST PIT (Flattened Math)
     if desyncEnabled and not autoGrokPITEnabled and speed > 30 and math.abs(steerInput) > 0.8 then
         if not isPitting then
             isPitting = true 
@@ -401,19 +446,38 @@ RunService.Stepped:Connect(function()
             local carCFrame = myCar:GetPivot()
             local flatRight = (carCFrame.RightVector * Vector3.new(1, 0, 1)).Unit
             local flatLook = (carCFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+            
             local lateralDirection = flatRight * steerInput
-            local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce * 2, 0) or Vector3.new(0, 0, 0)
             
-            local dynamicMultiplier = brakeForceMultiplier * (1 + (speed / 100))
-            local forwardLunge = flatLook * (speed * 0.2)
+            local verticalForce = Vector3.new(0, 0, 0)
+            if wedgeStrikeEnabled then
+                verticalForce = Vector3.new(0, wedgeForce * 2, 0)
+            end
             
-            vehicleRoot.AssemblyLinearVelocity = currentVelocity + forwardLunge + (lateralDirection * dynamicMultiplier0.5), 0)
+            local speedRatio = speed / 100
+            local dynMult = brakeForceMultiplier * (1 + speedRatio)
+            
+            local fwdDist = speed * 0.2
+            local forwardLunge = flatLook * fwdDist
+            local strikeForce = lateralDirection * dynMult
+            
+            vehicleRoot.AssemblyLinearVelocity = currentVelocity + forwardLunge + strikeForce + verticalForce
+            
+            local spinForce = steerInput * (dynMult * 0.5)
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, spinForce, 0)
             
             if heavyAnchorEnabled then
                 local ogProps = vehicleRoot.CustomPhysicalProperties or PhysicalProperties.new(vehicleRoot.Material)
                 vehicleRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
-                vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, vehicleRoot.AssemblyAngularVelocity.Y, 0)
-                task.delay(0.25, function() if vehicleRoot then vehicleRoot.CustomPhysicalProperties = ogProps end end)
+                
+                local safeAngY = vehicleRoot.AssemblyAngularVelocity.Y
+                vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, safeAngY, 0)
+                
+                task.delay(0.25, function() 
+                    if vehicleRoot then 
+                        vehicleRoot.CustomPhysicalProperties = ogProps 
+                    end 
+                end)
             end
         end
     elseif math.abs(steerInput) < 0.2 then
