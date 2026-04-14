@@ -3,7 +3,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
    Name = "ZenithViking | Tactical System",
    LoadingTitle = "Initializing Systems...",
-   LoadingSubtitle = "by Tâm",
+   LoadingSubtitle = "by ZENNY",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
    Theme = {
@@ -146,18 +146,22 @@ local function detectAndBypassAntiCheat()
     end)
 end
 
--- TRUE HOOKMETAMETHOD ANTI-KICK
+-- TRUE INVISIBLE META-HOOK ANTI-KICK (V4.9)
 local hookSuccess, hookError = pcall(function()
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local method = getnamecallmethod()
-        if antiKickEnabled and self == LocalPlayer and (method == "Kick" or method == "kick") then
-            print("[ZenithViking] META-HOOK: Blocked Local Kick Attempt")
-            return
+        if antiKickEnabled and not checkcaller() and self == LocalPlayer and (method == "Kick" or method == "kick") then
+            print("[ZenithViking] INVISIBLE HOOK: Silently swallowed a Kick attempt.")
+            return nil 
         end
         return oldNamecall(self, ...)
     end)
 end)
+
+if not hookSuccess then
+    warn("[ZenithViking] Executor failed to hook Namecall. Error: " .. tostring(hookError))
+end
 
 -- ==========================================
 -- [>] COMMAND INTERFACE (GUI)
@@ -433,7 +437,7 @@ RunService.Stepped:Connect(function()
         
         if antiCheatBypassEnabled then
             local bypassBoost = speedBoostAmount * 1.8
-            local bypassVec = flatLook * bypassBoost
+       local bypassVec = flatLook * bypassBoost
             vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + bypassVec
         end
     end
