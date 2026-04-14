@@ -90,54 +90,65 @@ local function getCarData(player)
 end
 
 -- ==========================================
--- [>] ANTI-CHEAT BYPASS & ANTI-KICK (Optimized)
+-- [>] ANTI-CHEAT BYPASS & TRUE ANTI-KICK
 -- ==========================================
 local function detectAndBypassAntiCheat()
     print("[ZenithViking] Scanning game for anti-cheat...")
     local acNames = {"AntiCheat", "AC", "AntiExploit", "Adonis", "Prodais", "AntiFling", "AntiFly", "AntiSpeed", "AntiCheatFolder", "AntiHack", "AntiCheatModule"}
     
-    for _, name in ipairs(acNames) do
-        local found = workspace:FindFirstChild(name, true) or game.ReplicatedStorage:FindFirstChild(name, true) or game.StarterPlayer:FindFirstChild(name, true) or game.ServerScriptService:FindFirstChild(name, true)
-        if found then pcall(function() found:Destroy() end) end
-    end
-
-    for _, obj in pairs(game:GetDescendants()) do
-        if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-            local lower = obj.Name:lower()
-            if lower:find("anti") or lower:find("ac_") or lower:find("adonis") or lower:find("prodais") or lower:find("fling") or lower:find("speedhack") then
-                pcall(function() obj.Disabled = true; obj:Destroy() end)
-            end
-        end
-    end
-
-    -- Targeted Anti-Fling (Zero Lag)
     task.spawn(function()
-        while antiCheatBypassEnabled do
-            local targets = {}
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                table.insert(targets, LocalPlayer.Character.HumanoidRootPart)
+        pcall(function()
+            for _, name in ipairs(acNames) do
+                local found = workspace:FindFirstChild(name, true) or game.ReplicatedStorage:FindFirstChild(name, true) or game.StarterPlayer:FindFirstChild(name, true)
+                if found then pcall(function() found:Destroy() end) end
             end
-            local myCar, myRoot = getCarData()
-            if myRoot then table.insert(targets, myRoot) end
-            
-            for _, root in ipairs(targets) do
-                if root.AssemblyLinearVelocity.Magnitude > 600 then
-                    root.AssemblyLinearVelocity = root.AssemblyLinearVelocity.Unit * 50
+
+            for _, obj in pairs(game:GetDescendants()) do
+                if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                    local lower = obj.Name:lower()
+                    if lower:find("anti") or lower:find("ac_") or lower:find("adonis") or lower:find("prodais") or lower:find("fling") or lower:find("speedhack") then
+                        pcall(function() obj.Disabled = true; obj:Destroy() end)
+                    end
                 end
             end
+        end)
+    end)
+
+    task.spawn(function()
+        while antiCheatBypassEnabled do
+            pcall(function()
+                local targets = {}
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    table.insert(targets, LocalPlayer.Character.HumanoidRootPart)
+                end
+                local myCar, myRoot = getCarData()
+                if myRoot then table.insert(targets, myRoot) end
+                
+                for _, root in ipairs(targets) do
+                    if root.AssemblyLinearVelocity.Magnitude > 600 then
+                        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity.Unit * 50
+                    end
+                end
+            end)
             task.wait(0.1)
         end
     end)
 end
 
-local function enableAntiKick()
-    if not antiKickEnabled then return end
-    local lp = Players.LocalPlayer
-    local oldKick = lp.Kick
-    lp.Kick = function(self, reason)
-        if self == lp then return end
-        return oldKick(self, reason)
-    end
+-- TRUE HOOKMETAMETHOD ANTI-KICK
+local hookSuccess, hookError = pcall(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if antiKickEnabled and self == LocalPlayer and (method == "Kick" or method == "kick") then
+            print("[ZenithViking] META-HOOK: Blocked Local Kick Attempt")
+            return
+        end
+        return oldNamecall(self, ...)
+    end)
+end)
+if not hookSuccess then
+    warn("[ZenithViking] Executor does not support hookmetamethod. Anti-Kick may fail.")
 end
 
 -- ==========================================
@@ -163,9 +174,8 @@ ModTab:CreateToggle({Name = "Bypass anti Fling/Fly/Speedhack/Adonis", CurrentVal
     antiCheatBypassEnabled = Value 
     if Value then detectAndBypassAntiCheat() end 
 end})
-ModTab:CreateToggle({Name = "Anti-Kick (Local Script Only)", CurrentValue = false, Callback = function(Value) 
+ModTab:CreateToggle({Name = "Anti-Kick (Meta-Hook)", CurrentValue = false, Callback = function(Value) 
     antiKickEnabled = Value 
-    if Value then enableAntiKick() end 
 end})
 
 AimTab:CreateToggle({Name = "Enable Aimlock", CurrentValue = false, Callback = function(Value) aimbotEnabled = Value end})
@@ -180,7 +190,7 @@ VisualsTab:CreateToggle({Name = "Show Tactical Hologram (Desync)", CurrentValue 
 VisualsTab:CreateSlider({Name = "Prediction Ping (ms)", Range = {0, 300}, Increment = 10, CurrentValue = 100, Callback = function(Value) pingPrediction = Value / 1000 end})
 
 -- ==========================================
--- [>] NEW EVENT-DRIVEN ESP ENGINE
+-- [>] ESP ENGINE
 -- ==========================================
 local function updateESPText()
     for name, data in pairs(espObjects) do
@@ -250,7 +260,7 @@ VisualsTab:CreateToggle({
             espLoop = task.spawn(function()
                 while espEnabled do
                     updateESPText()
-                    task.wait(0.05) -- Runs at 20 FPS, completely removes ESP lag
+                    task.wait(0.05) 
                 end
             end)
         else
@@ -263,7 +273,7 @@ VisualsTab:CreateToggle({
         end
     end
 })
-VisualsTab:CreateToggle({Name = "Show Highlight Box", CurrentValue = true, Callback = function(Value) 
+VisualsTab:CreateToggle({Name = "Show Highlight Box (Roblox Cap: 31)", CurrentValue = true, Callback = function(Value) 
     espShowHighlight = Value 
     for _, data in pairs(espObjects) do if data.Highlight then data.Highlight.Enabled = Value end end
 end})
@@ -337,16 +347,77 @@ end
 -- ==========================================
 -- [>] EXECUTION LOOPS
 -- ==========================================
+
+-- MIGRATED PHYSICS TO STEPPED: Fires BEFORE physics render, overriding custom chassis scripts like A-Chassis
 RunService.Stepped:Connect(function()
     local carData = {getCarData()}
     if not carData[1] then return end
-    local myCar = carData[1]
+    local myCar, vehicleRoot, seat = carData[1], carData[2], carData[3]
+
     if noclipEnabled then
         for _, part in pairs(myCar:GetDescendants()) do
             if part:IsA("BasePart") and part.Name ~= "ZenithRamBar" then
                 part.CanCollide = false
             end
         end
+    end
+
+    local steerInput = seat:IsA("VehicleSeat") and seat.SteerFloat or 0 
+    local throttleInput = seat:IsA("VehicleSeat") and seat.ThrottleFloat or 0
+    local currentVelocity = vehicleRoot.AssemblyLinearVelocity
+    local speed = currentVelocity.Magnitude
+
+    -- TRUE PIVOT SPOOFY VEHICLE (Bypasses A-Chassis restrictions)
+    if spoofyVehicleEnabled and not isPitting then
+        local carCFrame = myCar:GetPivot()
+        local rightVector = carCFrame.RightVector
+        
+        vehicleRoot.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, currentVelocity.Y - 1.5, currentVelocity.Z)
+        
+        local lateralVelocity = vehicleRoot.AssemblyLinearVelocity:Dot(rightVector)
+        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity - (rightVector * (lateralVelocity * 0.85))
+        
+        if math.abs(steerInput) > 0 then
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(vehicleRoot.AssemblyAngularVelocity.X, -steerInput * 8, vehicleRoot.AssemblyAngularVelocity.Z)
+        else
+            vehicleRoot.AssemblyAngularVelocity = Vector3.new(vehicleRoot.AssemblyAngularVelocity.X, 0, vehicleRoot.AssemblyAngularVelocity.Z)
+        end
+    end
+
+    -- ENGINE OVERCLOCK
+    if engineOverclockEnabled and throttleInput > 0 then
+        local flatLook = (vehicleRoot.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * speedBoostAmount)
+        if antiCheatBypassEnabled then
+            vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * (speedBoostAmount * 1.8))
+        end
+    end
+
+    -- MANUAL GHOST PIT
+    if desyncEnabled and not autoGrokPITEnabled and speed > 30 and math.abs(steerInput) > 0.8 then
+        if not isPitting then
+            isPitting = true 
+            
+            local carCFrame = myCar:GetPivot()
+            local flatRight = (carCFrame.RightVector * Vector3.new(1, 0, 1)).Unit
+            local flatLook = (carCFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+            local lateralDirection = flatRight * steerInput
+            local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce * 2, 0) or Vector3.new(0, 0, 0)
+            
+            local dynamicMultiplier = brakeForceMultiplier * (1 + (speed / 100))
+            local forwardLunge = flatLook * (speed * 0.2)
+            
+            vehicleRoot.AssemblyLinearVelocity = currentVelocity + forwardLunge + (lateralDirection * dynamicMultiplier0.5), 0)
+            
+            if heavyAnchorEnabled then
+                local ogProps = vehicleRoot.CustomPhysicalProperties or PhysicalProperties.new(vehicleRoot.Material)
+                vehicleRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
+                vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, vehicleRoot.AssemblyAngularVelocity.Y, 0)
+                task.delay(0.25, function() if vehicleRoot then vehicleRoot.CustomPhysicalProperties = ogProps end end)
+            end
+        end
+    elseif math.abs(steerInput) < 0.2 then
+        isPitting = false
     end
 end)
 
@@ -387,8 +458,6 @@ RunService.RenderStepped:Connect(function()
             if rootPart then
                 if trackedTarget ~= currentTarget then
                     if activeGhostModel then activeGhostModel:Destroy() end
-                    
-                    -- ARCHIVABLE FIX: Allows vehicles and characters to be successfully cloned
                     local oldArchivable = currentTarget.Archivable
                     currentTarget.Archivable = true
                     activeGhostModel = currentTarget:Clone()
@@ -406,77 +475,5 @@ RunService.RenderStepped:Connect(function()
                 if activeGhostModel then activeGhostModel:PivotTo(rootPart.CFrame + (rootPart.AssemblyLinearVelocity * pingPrediction)) end
             end
         end
-    end
-end)
-
-RunService.Heartbeat:Connect(function(deltaTime)
-    local myCar, vehicleRoot, seat = getCarData()
-    if not myCar then return end
-    
-    local steerInput = seat:IsA("VehicleSeat") and seat.SteerFloat or 0 
-    local throttleInput = seat:IsA("VehicleSeat") and seat.ThrottleFloat or 0
-    local currentVelocity = vehicleRoot.AssemblyLinearVelocity
-    local speed = currentVelocity.Magnitude
-
-    -- TRUE PIVOT SPOOFY VEHICLE
-    if spoofyVehicleEnabled and not isPitting then
-        local carCFrame = myCar:GetPivot()
-        local rightVector = carCFrame.RightVector
-        
-        vehicleRoot.AssemblyLinearVelocity = Vector3.new(currentVelocity.X, currentVelocity.Y - 1.5, currentVelocity.Z)
-        
-        local lateralVelocity = vehicleRoot.AssemblyLinearVelocity:Dot(rightVector)
-        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity - (rightVector * (lateralVelocity * 0.85))
-        
-        if math.abs(steerInput) > 0 then
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(
-                vehicleRoot.AssemblyAngularVelocity.X,
-                -steerInput * 8, 
-                vehicleRoot.AssemblyAngularVelocity.Z
-            )
-        else
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(
-                vehicleRoot.AssemblyAngularVelocity.X,
-                0, 
-                vehicleRoot.AssemblyAngularVelocity.Z
-            )
-        end
-    end
-
-    -- ENGINE OVERCLOCK
-    if engineOverclockEnabled and throttleInput > 0 then
-        local flatLook = (vehicleRoot.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-        vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * speedBoostAmount)
-        if antiCheatBypassEnabled then
-            vehicleRoot.AssemblyLinearVelocity = vehicleRoot.AssemblyLinearVelocity + (flatLook * (speedBoostAmount * 1.8))
-        end
-    end
-
-    -- MANUAL GHOST PIT
-    if desyncEnabled and not autoGrokPITEnabled and speed > 30 and math.abs(steerInput) > 0.8 then
-        if not isPitting then
-            isPitting = true 
-            
-            local carCFrame = myCar:GetPivot()
-            local flatRight = (carCFrame.RightVector * Vector3.new(1, 0, 1)).Unit
-            local flatLook = (carCFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-            local lateralDirection = flatRight * steerInput
-            local verticalForce = wedgeStrikeEnabled and Vector3.new(0, wedgeForce * 2, 0) or Vector3.new(0, 0, 0)
-            
-            local dynamicMultiplier = brakeForceMultiplier * (1 + (speed / 100))
-            local forwardLunge = flatLook * (speed * 0.2)
-            
-            vehicleRoot.AssemblyLinearVelocity = currentVelocity + forwardLunge + (lateralDirection * dynamicMultiplier) + verticalForce
-            vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, steerInput * (dynamicMultiplier * 0.5), 0)
-            
-            if heavyAnchorEnabled then
-                local ogProps = vehicleRoot.CustomPhysicalProperties or PhysicalProperties.new(vehicleRoot.Material)
-                vehicleRoot.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0)
-                vehicleRoot.AssemblyAngularVelocity = Vector3.new(0, vehicleRoot.AssemblyAngularVelocity.Y, 0)
-                task.delay(0.25, function() if vehicleRoot then vehicleRoot.CustomPhysicalProperties = ogProps end end)
-            end
-        end
-    elseif math.abs(steerInput) < 0.2 then
-        isPitting = false
     end
 end)
